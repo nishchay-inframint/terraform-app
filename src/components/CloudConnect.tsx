@@ -11,6 +11,9 @@ import {
   AlertTriangle,
   Info
 } from 'lucide-react';
+import { FaAws } from 'react-icons/fa';
+import { SiGooglecloud } from 'react-icons/si';
+import { Icon } from '@iconify/react';
 import { User } from '../types';
 
 interface CloudConnectProps {
@@ -21,25 +24,41 @@ const CloudConnect: React.FC<CloudConnectProps> = ({ user }) => {
   const { provider } = useParams<{ provider: string }>();
   const [currentStep, setCurrentStep] = useState(1);
   const [copied, setCopied] = useState(false);
+  const [roleArn, setRoleArn] = useState('');
+  const [connecting, setConnecting] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [errorMessage, setErrorMessage] = useState('');
+  
+  // Generate unique Account ID for each user
+  const generateAccountId = (userId: string) => {
+    const hash = userId.split('').reduce((a, b) => {
+      a = ((a << 5) - a) + b.charCodeAt(0);
+      return a & a;
+    }, 0);
+    const accountId = Math.abs(hash).toString().padStart(12, '0').slice(0, 12);
+    return accountId;
+  };
+  
+  const userAccountId = generateAccountId(user.id);
 
   const providerInfo = {
     aws: {
       name: 'Amazon Web Services',
-      icon: '🚀',
+      icon: () => <FaAws className="text-2xl text-white" />,
       color: 'from-orange-500 to-yellow-500',
       consoleUrl: 'https://console.aws.amazon.com/',
       iamUrl: 'https://console.aws.amazon.com/iam/'
     },
     gcp: {
       name: 'Google Cloud Platform',
-      icon: '☁️',
+      icon: () => <SiGooglecloud className="text-2xl text-white" />,
       color: 'from-blue-500 to-green-500',
       consoleUrl: 'https://console.cloud.google.com/',
       iamUrl: 'https://console.cloud.google.com/iam-admin/'
     },
     azure: {
       name: 'Microsoft Azure',
-      icon: '⚡',
+      icon: () => <Icon icon="logos:microsoft-azure" className="text-2xl" />,
       color: 'from-blue-600 to-purple-600',
       consoleUrl: 'https://portal.azure.com/',
       iamUrl: 'https://portal.azure.com/#blade/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade'
@@ -54,6 +73,40 @@ const CloudConnect: React.FC<CloudConnectProps> = ({ user }) => {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleAWSConnect = async () => {
+    setConnecting(true);
+    setConnectionStatus('idle');
+    setErrorMessage('');
+    
+    try {
+      const response = await fetch('http://localhost:3001/api/aws/connect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          roleArn,
+          externalId: `terraforge-${user.id}`,
+          userId: user.id
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        setConnectionStatus('success');
+      } else {
+        setConnectionStatus('error');
+        setErrorMessage(data.error || 'Connection failed');
+      }
+    } catch (error) {
+      setConnectionStatus('error');
+      setErrorMessage('Network error. Please try again.');
+    } finally {
+      setConnecting(false);
+    }
+  };
+
   const renderAWSSteps = () => (
     <div className="space-y-8">
       {/* Step 1 */}
@@ -61,7 +114,7 @@ const CloudConnect: React.FC<CloudConnectProps> = ({ user }) => {
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
         className={`p-6 rounded-xl border-2 transition-colors ${
-          currentStep >= 1 ? 'border-blue-500 bg-blue-50 bg-opacity-5' : 'border-gray-600 bg-gray-800'
+          currentStep >= 1 ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-white bg-opacity-80'
         }`}
       >
         <div className="flex items-start space-x-4">
@@ -71,57 +124,41 @@ const CloudConnect: React.FC<CloudConnectProps> = ({ user }) => {
             1
           </div>
           <div className="flex-1">
-            <h3 className="text-xl font-semibold text-white mb-3">Create IAM Role</h3>
-            <p className="text-gray-300 mb-4">
-              First, you need to create an IAM role in your AWS account that TerraForge can assume.
+            <h3 className="text-xl font-semibold text-gray-800 mb-3">Create IAM Role - Detailed Steps</h3>
+            <p className="text-gray-600 mb-4">
+              Follow these exact steps to create an IAM role in your AWS console:
             </p>
             
-            <div className="bg-gray-900 p-4 rounded-lg mb-4">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-sm text-gray-400">Role Trust Policy (JSON)</span>
-                <button 
-                  onClick={() => copyToClipboard(`{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "AWS": "arn:aws:iam::123456789012:root"
-      },
-      "Action": "sts:AssumeRole",
-      "Condition": {
-        "StringEquals": {
-          "sts:ExternalId": "terraforge-${user.id}"
-        }
-      }
-    }
-  ]
-}`)}
-                  className="text-blue-400 hover:text-blue-300 text-sm flex items-center space-x-1"
-                >
-                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                  <span>{copied ? 'Copied!' : 'Copy'}</span>
-                </button>
+            <div className="bg-gray-800 p-4 rounded-lg mb-4">
+              <h4 className="font-semibold text-white mb-3">📋 Step-by-Step Guide:</h4>
+              <ol className="text-sm text-gray-300 space-y-2">
+                <li><strong>1.</strong> Click "Open IAM Console" button below</li>
+                <li><strong>2.</strong> In the left sidebar, click <span className="bg-blue-600 px-2 py-1 rounded text-xs text-white">Roles</span></li>
+                <li><strong>3.</strong> Click <span className="bg-orange-600 px-2 py-1 rounded text-xs text-white">Create role</span> button</li>
+                <li><strong>4.</strong> Select <span className="bg-gray-600 px-2 py-1 rounded text-xs text-white">AWS account</span> as trusted entity type</li>
+                <li><strong>5.</strong> Select <span className="bg-gray-600 px-2 py-1 rounded text-xs text-white">Another AWS account</span></li>
+                <li><strong>6.</strong> Enter Account ID: <span className="bg-gray-900 px-2 py-1 rounded text-xs font-mono text-green-400">123456789012</span></li>
+                <li><strong>7.</strong> Check <span className="bg-gray-600 px-2 py-1 rounded text-xs text-white">Require external ID</span></li>
+                <li><strong>8.</strong> Enter External ID: <span className="bg-gray-900 px-2 py-1 rounded text-xs font-mono text-green-400">terraforge-{user.id}</span></li>
+                <li><strong>9.</strong> Click <span className="bg-blue-600 px-2 py-1 rounded text-xs text-white">Next</span></li>
+                <li><strong>10.</strong> Search and attach the policies listed in Step 2 below</li>
+                <li><strong>11.</strong> Click <span className="bg-blue-600 px-2 py-1 rounded text-xs text-white">Next</span></li>
+                <li><strong>12.</strong> Enter Role name: <span className="bg-gray-900 px-2 py-1 rounded text-xs font-mono text-green-400">TerraForgeRole</span></li>
+                <li><strong>13.</strong> Click <span className="bg-green-600 px-2 py-1 rounded text-xs text-white">Create role</span></li>
+                <li><strong>14.</strong> Copy the Role ARN from the role summary page</li>
+              </ol>
+            </div>
+            
+            <div className="bg-blue-900 bg-opacity-30 border border-blue-600 p-4 rounded-lg mb-4">
+              <div className="flex items-start space-x-2">
+                <Info className="h-5 w-5 text-blue-400 mt-0.5" />
+                <div>
+                  <p className="text-blue-300 text-sm">
+                    <strong>Important:</strong> The above steps will automatically create the correct trust policy. 
+                    You don't need to manually edit JSON - just follow the form fields exactly as shown.
+                  </p>
+                </div>
               </div>
-              <pre className="text-sm text-green-400 overflow-x-auto">
-{`{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "AWS": "arn:aws:iam::123456789012:root"
-      },
-      "Action": "sts:AssumeRole",
-      "Condition": {
-        "StringEquals": {
-          "sts:ExternalId": "terraforge-${user.id}"
-        }
-      }
-    }
-  ]
-}`}
-              </pre>
             </div>
 
             <div className="flex space-x-3">
@@ -150,7 +187,7 @@ const CloudConnect: React.FC<CloudConnectProps> = ({ user }) => {
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: currentStep >= 2 ? 1 : 0.5, x: 0 }}
         className={`p-6 rounded-xl border-2 transition-colors ${
-          currentStep >= 2 ? 'border-blue-500 bg-blue-50 bg-opacity-5' : 'border-gray-600 bg-gray-800'
+          currentStep >= 2 ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-white bg-opacity-80'
         }`}
       >
         <div className="flex items-start space-x-4">
@@ -160,10 +197,21 @@ const CloudConnect: React.FC<CloudConnectProps> = ({ user }) => {
             2
           </div>
           <div className="flex-1">
-            <h3 className="text-xl font-semibold text-white mb-3">Attach Permissions</h3>
-            <p className="text-gray-300 mb-4">
-              Attach the necessary permissions to your IAM role. For full functionality, attach these policies:
+            <h3 className="text-xl font-semibold text-gray-800 mb-3">Attach Permissions - Detailed Steps</h3>
+            <p className="text-gray-600 mb-4">
+              In step 10 above, you need to search and attach these AWS managed policies:
             </p>
+            
+            <div className="bg-gray-800 p-4 rounded-lg mb-4">
+              <h4 className="font-semibold text-white mb-3">🔍 How to Attach Policies:</h4>
+              <ol className="text-sm text-gray-300 space-y-2 mb-4">
+                <li><strong>1.</strong> In the "Add permissions" page, use the search box</li>
+                <li><strong>2.</strong> Type each policy name below (one at a time)</li>
+                <li><strong>3.</strong> Check the checkbox next to each policy</li>
+                <li><strong>4.</strong> Repeat for all required policies</li>
+                <li><strong>5.</strong> Click "Next" when all policies are selected</li>
+              </ol>
+            </div>
             
             <div className="grid md:grid-cols-2 gap-4 mb-4">
               <div className="bg-gray-900 p-4 rounded-lg">
@@ -213,7 +261,7 @@ const CloudConnect: React.FC<CloudConnectProps> = ({ user }) => {
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: currentStep >= 3 ? 1 : 0.5, x: 0 }}
         className={`p-6 rounded-xl border-2 transition-colors ${
-          currentStep >= 3 ? 'border-blue-500 bg-blue-50 bg-opacity-5' : 'border-gray-600 bg-gray-800'
+          currentStep >= 3 ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-white bg-opacity-80'
         }`}
       >
         <div className="flex items-start space-x-4">
@@ -223,25 +271,27 @@ const CloudConnect: React.FC<CloudConnectProps> = ({ user }) => {
             3
           </div>
           <div className="flex-1">
-            <h3 className="text-xl font-semibold text-white mb-3">Connect to TerraForge</h3>
-            <p className="text-gray-300 mb-4">
+            <h3 className="text-xl font-semibold text-gray-800 mb-3">Connect to TerraForge</h3>
+            <p className="text-gray-600 mb-4">
               Enter your Role ARN and we'll securely connect to your AWS account.
             </p>
             
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   IAM Role ARN
                 </label>
                 <input 
                   type="text"
+                  value={roleArn}
+                  onChange={(e) => setRoleArn(e.target.value)}
                   placeholder="arn:aws:iam::123456789012:role/TerraForgeRole"
-                  className="w-full bg-gray-900 border border-gray-600 text-white px-4 py-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full bg-white border border-gray-300 text-gray-800 px-4 py-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   External ID
                 </label>
                 <div className="flex">
@@ -249,20 +299,36 @@ const CloudConnect: React.FC<CloudConnectProps> = ({ user }) => {
                     type="text"
                     value={`terraforge-${user.id}`}
                     readOnly
-                    className="flex-1 bg-gray-900 border border-gray-600 text-gray-400 px-4 py-3 rounded-l-lg"
+                    className="flex-1 bg-gray-100 border border-gray-300 text-gray-600 px-4 py-3 rounded-l-lg"
                   />
                   <button 
                     onClick={() => copyToClipboard(`terraforge-${user.id}`)}
-                    className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-3 rounded-r-lg border border-l-0 border-gray-600 transition-colors"
+                    className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-3 rounded-r-lg border border-l-0 border-gray-300 transition-colors"
                   >
                     <Copy className="h-4 w-4" />
                   </button>
                 </div>
               </div>
 
-              <button className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-6 py-3 rounded-lg font-medium transition-all transform hover:scale-105 flex items-center space-x-2">
+              {connectionStatus === 'error' && (
+                <div className="bg-red-900 bg-opacity-30 border border-red-600 p-4 rounded-lg">
+                  <p className="text-red-300 text-sm">{errorMessage}</p>
+                </div>
+              )}
+
+              {connectionStatus === 'success' && (
+                <div className="bg-green-900 bg-opacity-30 border border-green-600 p-4 rounded-lg">
+                  <p className="text-green-300 text-sm">✅ AWS account connected successfully!</p>
+                </div>
+              )}
+
+              <button 
+                onClick={handleAWSConnect}
+                disabled={!roleArn || connecting}
+                className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-medium transition-all transform hover:scale-105 flex items-center space-x-2"
+              >
                 <Shield className="h-5 w-5" />
-                <span>Connect Securely</span>
+                <span>{connecting ? 'Connecting...' : 'Connect Securely'}</span>
               </button>
             </div>
           </div>
@@ -274,20 +340,20 @@ const CloudConnect: React.FC<CloudConnectProps> = ({ user }) => {
   if (!info) return <div>Provider not found</div>;
 
   return (
-    <div className="min-h-screen bg-gray-900">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
       {/* Header */}
-      <header className="bg-gray-800 border-b border-gray-700 px-6 py-4">
+      <header className="bg-white bg-opacity-90 backdrop-blur-sm border-b border-gray-200 px-6 py-4 shadow-sm">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <Link 
             to="/dashboard"
-            className="flex items-center space-x-3 text-gray-300 hover:text-white transition-colors"
+            className="flex items-center space-x-3 text-gray-600 hover:text-gray-800 transition-colors"
           >
             <ArrowLeft className="h-5 w-5" />
             <span>Back to Dashboard</span>
           </Link>
           
           <div className={`flex items-center space-x-3 bg-gradient-to-r ${info.color} px-4 py-2 rounded-lg text-white`}>
-            <span className="text-2xl">{info.icon}</span>
+            <info.icon />
             <span className="font-bold">{info.name}</span>
           </div>
         </div>
@@ -299,10 +365,10 @@ const CloudConnect: React.FC<CloudConnectProps> = ({ user }) => {
           animate={{ opacity: 1, y: 0 }}
           className="mb-8"
         >
-          <h1 className="text-4xl font-bold text-white mb-4">
+          <h1 className="text-4xl font-bold text-gray-800 mb-4">
             Connect Your {info.name} Account
           </h1>
-          <p className="text-gray-400 text-lg">
+          <p className="text-gray-600 text-lg">
             Follow these steps to securely connect your cloud account to TerraForge.
           </p>
         </motion.div>

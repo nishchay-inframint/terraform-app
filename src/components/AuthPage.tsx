@@ -10,47 +10,39 @@ interface AuthPageProps {
 
 const AuthPage: React.FC<AuthPageProps> = ({ setUser }) => {
   const handleGithubLogin = () => {
-    // Mock authentication - in production, implement actual OAuth
-    const mockUser: User = {
-      id: '1',
-      name: 'John Developer',
-      email: 'john@example.com',
-      avatar: 'https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?w=150',
-      provider: 'github'
-    };
-    setUser(mockUser);
+    const clientId = 'Ov23lirFHb0j2Sdleix8';
+    const redirectUri = `${window.location.origin}/auth/github/callback`;
+    const scope = 'user:email';
+    
+    window.location.href = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&scope=${scope}`;
   };
 
   const handleGoogleLogin = () => {
-    // Mock authentication - in production, implement actual OAuth
-    const mockUser: User = {
-      id: '2',
-      name: 'Jane Developer',
-      email: 'jane@example.com',
-      avatar: 'https://images.pexels.com/photos/733872/pexels-photo-733872.jpeg?w=150',
-      provider: 'google'
-    };
-    setUser(mockUser);
+    const clientId = '90927507397-npd3aaijqog4hrtnq1lhj894c55u1r7r.apps.googleusercontent.com';
+    const redirectUri = encodeURIComponent(`${window.location.origin}/auth/google/callback`);
+    const scope = encodeURIComponent('openid email profile');
+    
+    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&scope=${scope}&response_type=code&access_type=offline`;
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900 flex items-center justify-center px-6">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-100 to-purple-100 flex items-center justify-center px-6">
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-gray-800 p-8 rounded-2xl shadow-2xl w-full max-w-md"
+        className="bg-white bg-opacity-90 backdrop-blur-sm p-8 rounded-2xl shadow-2xl w-full max-w-md border border-gray-200"
       >
         <Link 
           to="/"
-          className="inline-flex items-center text-gray-400 hover:text-white mb-6 transition-colors"
+          className="inline-flex items-center text-gray-600 hover:text-gray-800 mb-6 transition-colors"
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Home
         </Link>
 
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-white mb-2">Welcome to TerraForge</h1>
-          <p className="text-gray-400">Sign in to start building your infrastructure</p>
+          <h1 className="text-3xl font-bold text-gray-800 mb-2">Welcome to TerraForge</h1>
+          <p className="text-gray-600">Sign in to start building your infrastructure</p>
         </div>
 
         <div className="space-y-4">
@@ -58,7 +50,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ setUser }) => {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={handleGithubLogin}
-            className="w-full bg-gray-900 hover:bg-black text-white p-4 rounded-lg font-medium transition-colors flex items-center justify-center space-x-3"
+            className="w-full bg-gray-800 hover:bg-gray-900 text-white p-4 rounded-lg font-medium transition-colors flex items-center justify-center space-x-3 shadow-lg"
           >
             <Github className="h-5 w-5" />
             <span>Continue with GitHub</span>
@@ -76,7 +68,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ setUser }) => {
         </div>
 
         <div className="mt-8 text-center">
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-600">
             By signing in, you agree to our{' '}
             <a href="#" className="text-blue-400 hover:text-blue-300">Terms of Service</a>
             {' '}and{' '}

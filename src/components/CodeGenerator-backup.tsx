@@ -54,6 +54,10 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
   const [showCli, setShowCli] = useState(false);
   const cliRef = useRef<HTMLDivElement>(null);
 
+  const formatFieldName = (name: string) => {
+    return name.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+  };
+
   const providers = {
     aws: {
       name: 'Amazon Web Services',
@@ -522,10 +526,6 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
     }
   };
 
-  const formatFieldName = (name: string) => {
-    return name.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-  };
-
   const serviceCategories = {
     'Compute': { icon: Server, color: 'text-blue-400' },
     'Storage': { icon: Database, color: 'text-green-400' },
@@ -547,17 +547,6 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
       'Monitoring': 'bg-gray-900/50 text-gray-300'
     };
     return styles[category as keyof typeof styles] || 'bg-gray-900/50 text-gray-300';
-  };
-
-  const addCliOutput = (message: string, type: 'info' | 'success' | 'error' | 'warning' = 'info') => {
-    const timestamp = new Date().toLocaleTimeString();
-    const prefix = { info: '[INFO]', success: '[SUCCESS]', error: '[ERROR]', warning: '[WARNING]' }[type];
-    setCliOutput(prev => [...prev, `${timestamp} ${prefix} ${message}`]);
-    setTimeout(() => {
-      if (cliRef.current) {
-        cliRef.current.scrollTop = cliRef.current.scrollHeight;
-      }
-    }, 100);
   };
 
   const generateTerraformCode = async () => {
@@ -606,9 +595,9 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
     }
   };
   
-  const parseAIGeneratedCode = (aiCode: string) => {
+  const parseAIGeneratedCode = (aiCode) => {
     // Simple parser to split AI code into files
-    const files: Record<string, string> = {};
+    const files = {};
     const sections = aiCode.split(/# (\w+\.tf)/g);
     
     for (let i = 1; i < sections.length; i += 2) {
@@ -631,52 +620,50 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
     const files: Record<string, string> = {};
     
     // 1. versions.tf - Terraform and provider versions
-    files['versions.tf'] = generateVersionsFile();
-    
+    files['versions.tf'] = `terraform {
+  required_version = ">= 1.0"
+  required_providers {
+    ${selectedProvider} = {
+      source  = "${getProviderSource()}"
+      version = "~> ${getProviderVersion()}"
+    }
+  }
+}`;
+
     // 2. variables.tf - Input variables
-    files['variables.tf'] = generateVariablesFile();
-    
+    files['variables.tf'] = generateVariables();
+
     // 3. main.tf - Main resources
-    files['main.tf'] = generateMainFile();
-    
+    files['main.tf'] = generateMainResources();
+
     // 4. outputs.tf - Output values
-    files['outputs.tf'] = generateOutputsFile();
-    
+    files['outputs.tf'] = generateOutputs();
+
     // 5. terraform.tfvars.example - Example variables
-    files['terraform.tfvars.example'] = generateTfvarsFile();
-    
+    files['terraform.tfvars.example'] = generateTfvarsExample();
+
     return files;
   };
 
-  const generateVersionsFile = () => {
-    const providerConfig = {
-      aws: { source: 'hashicorp/aws', version: '~> 5.0' },
-      gcp: { source: 'hashicorp/google', version: '~> 4.0' },
-      azure: { source: 'hashicorp/azurerm', version: '~> 3.0' }
+  const getProviderSource = () => {
+    const sources = {
+      aws: 'hashicorp/aws',
+      gcp: 'hashicorp/google',
+      azure: 'hashicorp/azurerm'
     };
-    
-    const config = providerConfig[selectedProvider as keyof typeof providerConfig];
-    
-    return `terraform {
-  required_version = ">= 1.0"
-  
-  required_providers {
-    ${selectedProvider} = {
-      source  = "${config.source}"
-      version = "${config.version}"
-    }
-  }
-  
-  # Uncomment for remote state
-  # backend "s3" {
-  #   bucket = "your-terraform-state-bucket"
-  #   key    = "${selectedService?.name?.toLowerCase()}/terraform.tfstate"
-  #   region = "us-east-1"
-  # }
-}`;
+    return sources[selectedProvider as keyof typeof sources];
   };
 
-  const generateVariablesFile = () => {
+  const getProviderVersion = () => {
+    const versions = {
+      aws: '5.0',
+      gcp: '4.0',
+      azure: '3.0'
+    };
+    return versions[selectedProvider as keyof typeof versions];
+  };
+
+  const generateVariables = () => {
     const vars = selectedService?.required_fields.map(field => {
       const description = `${formatFieldName(field.name)} for ${selectedService.name}`;
       const defaultValue = field.default ? `\n  default = "${field.default}"` : '';
@@ -691,171 +678,84 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
 }`;
     }).join('\n\n');
     
-    return `# Input Variables for ${selectedService?.name}\n\n${vars}\n\n# Environment Configuration\nvariable "environment" {
-  description = "Environment name (dev, staging, prod)"
-  type        = string
-  default     = "dev"
-  
-  validation {
-    condition     = contains(["dev", "staging", "prod"], var.environment)
-    error_message = "Environment must be dev, staging, or prod."
-  }
-}\n\nvariable "project_name" {
-  description = "Name of the project"
-  type        = string
-  default     = "terraforge"
-}\n\n# Common Tags\nvariable "tags" {
+    return `# Input Variables\n\n${vars}\n\n# Common Tags\nvariable "tags" {
   description = "Common tags for all resources"
   type        = map(string)
   default = {
     Environment = "dev"
     Project     = "terraforge"
     ManagedBy   = "terraform"
-    Owner       = "devops-team"
   }
 }`;
   };
 
-  const generateMainFile = () => {
-    const providerBlock = generateProviderBlock();
-    const dataBlocks = generateDataBlocks();
-    const localBlocks = generateLocalBlocks();
-    const resourceBlocks = generateResourceBlocks();
-    
-    return `${providerBlock}\n\n${dataBlocks}\n\n${localBlocks}\n\n${resourceBlocks}`;
-  };
-
-  const generateProviderBlock = () => {
-    switch (selectedProvider) {
-      case 'aws':
-        return `# AWS Provider Configuration\nprovider "aws" {
-  region = "us-east-1"
-  
-  default_tags {
-    tags = var.tags
-  }
-}`;
-      case 'gcp':
-        return `# Google Cloud Provider Configuration\nprovider "google" {
-  project = var.project_name
-  region  = "us-central1"
-  
-  default_labels = var.tags
-}`;
-      case 'azure':
-        return `# Azure Provider Configuration\nprovider "azurerm" {
-  features {}
-}`;
-      default:
-        return '';
-    }
-  };
-
-  const generateDataBlocks = () => {
-    switch (selectedProvider) {
-      case 'aws':
-        return `# Data Sources\ndata "aws_availability_zones" "available" {
-  state = "available"
-}\n\ndata "aws_caller_identity" "current" {}`;
-      case 'gcp':
-        return `# Data Sources\ndata "google_project" "current" {}`;
-      case 'azure':
-        return `# Data Sources\ndata "azurerm_client_config" "current" {}`;
-      default:
-        return '';
-    }
-  };
-
-  const generateLocalBlocks = () => {
+  const generateMainResources = () => {
     const resourceName = formData[selectedService?.required_fields[0]?.name] || 'main';
     
-    return `# Local Values\nlocals {
-  resource_name = "\$\{var.project_name\}-\$\{var.environment\}-${resourceName}"
-  
-  common_tags = merge(var.tags, {
-    Name        = local.resource_name
-    Environment = var.environment
-    Service     = "${selectedService?.name}"
-  })
-}`;
-  };
-
-  const generateResourceBlocks = () => {
     switch (selectedProvider) {
       case 'aws':
-        return generateAWSResources();
+        return generateAWSResources(resourceName);
       case 'gcp':
-        return generateGCPResources();
+        return generateGCPResources(resourceName);
       case 'azure':
-        return generateAzureResources();
+        return generateAzureResources(resourceName);
       default:
-        return '';
+        return '# No resources defined';
     }
   };
 
-  const generateAWSResources = () => {
+  const generateAWSResources = (resourceName: string) => {
     if (!selectedService) return '';
+    
+    const firstField = selectedService.required_fields[0]?.name;
+    const commonTags = `\n  tags = merge(var.tags, {\n    Name = var.${firstField}\n  })`;
     
     switch (selectedService.id) {
       case 'ec2':
+        const keyPairConfig = formData.key_pair ? `\n  key_name = var.key_pair` : '';
+        const monitoringEnabled = formData.monitoring === 'Enabled';
+        const ebsOptimized = formData.ebs_optimized === 'true';
+        const volumeSize = formData.root_volume_size || '20';
+        const volumeType = formData.root_volume_type || 'gp3';
+        
         return `# VPC and Networking\nresource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
   enable_dns_hostnames = true
-  enable_dns_support   = true
-  
-  tags = merge(local.common_tags, {
-    Name = "\$\{local.resource_name\}-vpc"
-  })
-}\n\nresource "aws_subnet" "public" {
-  count = 2
-  
+  enable_dns_support   = true${commonTags}
+}
+
+resource "aws_subnet" "main" {
   vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.\$\{count.index + 1\}.0/24"
-  availability_zone       = data.aws_availability_zones.available.names[count.index]
-  map_public_ip_on_launch = true
-  
-  tags = merge(local.common_tags, {
-    Name = "\$\{local.resource_name\}-public-\$\{count.index + 1\}"
-    Type = "Public"
-  })
-}\n\nresource "aws_internet_gateway" "main" {
-  vpc_id = aws_vpc.main.id
-  
-  tags = merge(local.common_tags, {
-    Name = "\$\{local.resource_name\}-igw"
-  })
-}\n\nresource "aws_route_table" "public" {
+  cidr_block              = "10.0.1.0/24"
+  availability_zone       = data.aws_availability_zones.available.names[0]
+  map_public_ip_on_launch = true${commonTags}
+}
+
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id${commonTags}
+}
+
+resource "aws_route_table" "main" {
   vpc_id = aws_vpc.main.id
   
   route {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.main.id
-  }
-  
-  tags = merge(local.common_tags, {
-    Name = "\$\{local.resource_name\}-public-rt"
-  })
-}\n\nresource "aws_route_table_association" "public" {
-  count = length(aws_subnet.public)
-  
-  subnet_id      = aws_subnet.public[count.index].id
-  route_table_id = aws_route_table.public.id
-}\n\n# Security Group\nresource "aws_security_group" "main" {
-  name_prefix = "\$\{local.resource_name\}-"
+  }${commonTags}
+}
+
+resource "aws_route_table_association" "main" {
+  subnet_id      = aws_subnet.main.id
+  route_table_id = aws_route_table.main.id
+}
+
+# Security Group\nresource "aws_security_group" "main" {
+  name_prefix = "\$\{var.instance_name\}-"
   vpc_id      = aws_vpc.main.id
   
   ingress {
-    description = "SSH"
     from_port   = 22
     to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  
-  ingress {
-    description = "HTTP"
-    from_port   = 80
-    to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -865,77 +765,80 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
-  }
-  
-  tags = merge(local.common_tags, {
-    Name = "\$\{local.resource_name\}-sg"
-  })
-}\n\n# EC2 Instance\nresource "aws_instance" "main" {
+  }${commonTags}
+}
+
+# EC2 Instance\nresource "aws_instance" "main" {
   ami                    = var.ami_id
   instance_type          = var.instance_type
-  subnet_id              = aws_subnet.public[0].id
-  vpc_security_group_ids = [aws_security_group.main.id]
-  key_name               = var.key_pair
-  
-  monitoring    = ${formData.monitoring === 'Enabled'}
-  ebs_optimized = ${formData.ebs_optimized === 'true'}
+  subnet_id              = aws_subnet.main.id
+  vpc_security_group_ids = [aws_security_group.main.id]${keyPairConfig}
+  monitoring             = ${monitoringEnabled}
+  ebs_optimized          = ${ebsOptimized}
   
   root_block_device {
-    volume_type = var.root_volume_type
-    volume_size = var.root_volume_size
+    volume_type = "${volumeType}"
+    volume_size = ${volumeSize}
     encrypted   = true
-    
-    tags = merge(local.common_tags, {
-      Name = "\$\{local.resource_name\}-root-volume"
-    })
-  }
-  
-  user_data = base64encode(templatefile("\$\{path.module\}/user_data.sh", {
-    instance_name = var.instance_name
-  }))
-  
-  tags = local.common_tags
-  
-  lifecycle {
-    create_before_destroy = true
-  }
+  }${commonTags}
+}
+
+# Data Sources\ndata "aws_availability_zones" "available" {
+  state = "available"
 }`;
       
       case 's3':
+        const blockPublicAccess = formData.public_access_block === 'Block all public access';
+        const versioningStatus = formData.versioning || 'Enabled';
+        const encryptionAlgorithm = formData.encryption || 'AES256';
+        
         return `# S3 Bucket\nresource "aws_s3_bucket" "main" {
-  bucket        = local.resource_name
-  force_destroy = false
-  
-  tags = local.common_tags
-}\n\nresource "aws_s3_bucket_versioning" "main" {
+  bucket        = var.bucket_name
+  force_destroy = true${commonTags}
+}
+
+resource "aws_s3_bucket_versioning" "main" {
   bucket = aws_s3_bucket.main.id
-  
   versioning_configuration {
-    status = var.versioning
+    status = "${versioningStatus}"
   }
-}\n\nresource "aws_s3_bucket_server_side_encryption_configuration" "main" {
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "main" {
   bucket = aws_s3_bucket.main.id
   
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = var.encryption
+      sse_algorithm = "${encryptionAlgorithm}"
     }
-    bucket_key_enabled = true
   }
-}\n\nresource "aws_s3_bucket_public_access_block" "main" {
+}
+
+resource "aws_s3_bucket_public_access_block" "main" {
   bucket = aws_s3_bucket.main.id
   
-  block_public_acls       = ${formData.public_access_block === 'Block all public access'}
-  block_public_policy     = ${formData.public_access_block === 'Block all public access'}
-  ignore_public_acls      = ${formData.public_access_block === 'Block all public access'}
-  restrict_public_buckets = ${formData.public_access_block === 'Block all public access'}
-}\n\nresource "aws_s3_bucket_lifecycle_configuration" "main" {
-  count = var.lifecycle_policy == "Enabled" ? 1 : 0
-  
+  block_public_acls       = ${blockPublicAccess}
+  block_public_policy     = ${blockPublicAccess}
+  ignore_public_acls      = ${blockPublicAccess}
+  restrict_public_buckets = ${blockPublicAccess}
+}${formData.object_lock === 'Enabled' ? `
+
+resource "aws_s3_bucket_object_lock_configuration" "main" {
   bucket = aws_s3_bucket.main.id
   
   rule {
-    id     = "lifecycle_rule"
+    default_retention {
+      mode = "GOVERNANCE"
+      days = 30
+    }
+  }
+}` : ''}${formData.lifecycle_policy === 'Enabled' ? `
+
+resource "aws_s3_bucket_lifecycle_configuration" "main" {
+  bucket = aws_s3_bucket.main.id
+  
+  rule {
+    id     = "transition_rule"
     status = "Enabled"
     
     transition {
@@ -947,34 +850,23 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
       days          = 90
       storage_class = "GLACIER"
     }
-    
-    transition {
-      days          = 365
-      storage_class = "DEEP_ARCHIVE"
-    }
   }
-}`;
+}` : ''}`;
       
       default:
         return `# ${selectedService.name} Resource\nresource "aws_${selectedService.id}" "main" {
-  # Configuration for ${selectedService.name}
-  ${selectedService.required_fields.map(field => {
-    const value = formData[field.name] || field.default || 'var.' + field.name;
-    return `${field.name} = "${value}"`;
-  }).join('\n  ')}
-  
-  tags = local.common_tags
+  # Configuration will be generated based on service type${commonTags}
 }`;
     }
   };
 
-  const generateGCPResources = () => {
+  const generateGCPResources = (resourceName: string) => {
     if (!selectedService) return '';
     
     switch (selectedService.id) {
       case 'compute_instance':
         return `# Compute Instance\nresource "google_compute_instance" "main" {
-  name         = local.resource_name
+  name         = var.instance_name
   machine_type = var.machine_type
   zone         = "us-central1-a"
   
@@ -988,54 +880,50 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
   
   network_interface {
     network = "default"
-    
     access_config {
       // Ephemeral public IP
     }
   }
   
-  metadata_startup_script = file("\$\{path.module\}/startup.sh")
-  
   labels = var.tags
-  
-  lifecycle {
-    create_before_destroy = true
-  }
 }`;
       
       default:
         return `# ${selectedService.name} Resource\nresource "google_${selectedService.id}" "main" {
-  name = local.resource_name
-  
+  # Configuration will be generated based on service type
   labels = var.tags
 }`;
     }
   };
 
-  const generateAzureResources = () => {
+  const generateAzureResources = (resourceName: string) => {
     if (!selectedService) return '';
     
     switch (selectedService.id) {
       case 'virtual_machine':
         return `# Resource Group\nresource "azurerm_resource_group" "main" {
-  name     = local.resource_name
+  name     = "rg-\$\{var.vm_name\}"
   location = "East US"
-  
-  tags = var.tags
-}\n\n# Virtual Network\nresource "azurerm_virtual_network" "main" {
-  name                = "\$\{local.resource_name\}-vnet"
+  tags     = var.tags
+}
+
+# Virtual Network\nresource "azurerm_virtual_network" "main" {
+  name                = "vnet-\$\{var.vm_name\}"
   address_space       = ["10.0.0.0/16"]
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
-  
-  tags = var.tags
-}\n\nresource "azurerm_subnet" "main" {
-  name                 = "\$\{local.resource_name\}-subnet"
+  tags                = var.tags
+}
+
+resource "azurerm_subnet" "main" {
+  name                 = "subnet-\$\{var.vm_name\}"
   resource_group_name  = azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.main.name
   address_prefixes     = ["10.0.1.0/24"]
-}\n\n# Network Security Group\nresource "azurerm_network_security_group" "main" {
-  name                = "\$\{local.resource_name\}-nsg"
+}
+
+# Network Security Group\nresource "azurerm_network_security_group" "main" {
+  name                = "nsg-\$\{var.vm_name\}"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
   
@@ -1052,8 +940,10 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
   }
   
   tags = var.tags
-}\n\n# Network Interface\nresource "azurerm_network_interface" "main" {
-  name                = "\$\{local.resource_name\}-nic"
+}
+
+# Network Interface\nresource "azurerm_network_interface" "main" {
+  name                = "nic-\$\{var.vm_name\}"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
   
@@ -1061,19 +951,13 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
     name                          = "internal"
     subnet_id                     = azurerm_subnet.main.id
     private_ip_address_allocation = "Dynamic"
-    public_ip_address_id          = azurerm_public_ip.main.id
   }
   
   tags = var.tags
-}\n\nresource "azurerm_public_ip" "main" {
-  name                = "\$\{local.resource_name\}-pip"
-  resource_group_name = azurerm_resource_group.main.name
-  location            = azurerm_resource_group.main.location
-  allocation_method   = "Static"
-  
-  tags = var.tags
-}\n\n# Virtual Machine\nresource "azurerm_linux_virtual_machine" "main" {
-  name                = local.resource_name
+}
+
+# Virtual Machine\nresource "azurerm_linux_virtual_machine" "main" {
+  name                = var.vm_name
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
   size                = var.vm_size
@@ -1107,15 +991,13 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
       
       default:
         return `# ${selectedService.name} Resource\nresource "azurerm_${selectedService.id}" "main" {
-  name                = local.resource_name
-  resource_group_name = azurerm_resource_group.main.name
-  
+  # Configuration will be generated based on service type
   tags = var.tags
 }`;
     }
   };
 
-  const generateOutputsFile = () => {
+  const generateOutputs = () => {
     if (!selectedService) return '';
     
     switch (selectedProvider) {
@@ -1124,32 +1006,21 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
           return `# Output Values\n\noutput "instance_id" {
   description = "ID of the EC2 instance"
   value       = aws_instance.main.id
-}\n\noutput "instance_public_ip" {
+}
+
+output "instance_public_ip" {
   description = "Public IP address of the EC2 instance"
   value       = aws_instance.main.public_ip
-}\n\noutput "instance_private_ip" {
+}
+
+output "instance_private_ip" {
   description = "Private IP address of the EC2 instance"
   value       = aws_instance.main.private_ip
-}\n\noutput "vpc_id" {
+}
+
+output "vpc_id" {
   description = "ID of the VPC"
   value       = aws_vpc.main.id
-}\n\noutput "security_group_id" {
-  description = "ID of the security group"
-  value       = aws_security_group.main.id
-}\n\noutput "ssh_command" {
-  description = "SSH command to connect to the instance"
-  value       = "ssh -i ~/.ssh/\$\{var.key_pair\}.pem ec2-user@\$\{aws_instance.main.public_ip\}"
-}`;
-        } else if (selectedService.id === 's3') {
-          return `# Output Values\n\noutput "bucket_name" {
-  description = "Name of the S3 bucket"
-  value       = aws_s3_bucket.main.bucket
-}\n\noutput "bucket_arn" {
-  description = "ARN of the S3 bucket"
-  value       = aws_s3_bucket.main.arn
-}\n\noutput "bucket_domain_name" {
-  description = "Domain name of the S3 bucket"
-  value       = aws_s3_bucket.main.bucket_domain_name
 }`;
         }
         break;
@@ -1158,12 +1029,11 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
           return `# Output Values\n\noutput "instance_name" {
   description = "Name of the compute instance"
   value       = google_compute_instance.main.name
-}\n\noutput "instance_external_ip" {
+}
+
+output "instance_external_ip" {
   description = "External IP address of the compute instance"
   value       = google_compute_instance.main.network_interface[0].access_config[0].nat_ip
-}\n\noutput "ssh_command" {
-  description = "SSH command to connect to the instance"
-  value       = "gcloud compute ssh \$\{google_compute_instance.main.name\} --zone=\$\{google_compute_instance.main.zone\}"
 }`;
         }
         break;
@@ -1172,148 +1042,280 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
           return `# Output Values\n\noutput "vm_name" {
   description = "Name of the virtual machine"
   value       = azurerm_linux_virtual_machine.main.name
-}\n\noutput "resource_group_name" {
+}
+
+output "resource_group_name" {
   description = "Name of the resource group"
   value       = azurerm_resource_group.main.name
-}\n\noutput "public_ip_address" {
-  description = "Public IP address of the virtual machine"
-  value       = azurerm_public_ip.main.ip_address
-}\n\noutput "ssh_command" {
-  description = "SSH command to connect to the VM"
-  value       = "ssh adminuser@\$\{azurerm_public_ip.main.ip_address\}"
 }`;
         }
         break;
     }
     
-    return `# Output Values\n\noutput "resource_name" {
-  description = "Name of the created resource"
-  value       = local.resource_name
-}\n\noutput "environment" {
-  description = "Environment name"
-  value       = var.environment
+    return `# Output Values\n\noutput "resource_id" {
+  description = "ID of the created resource"
+  value       = "# Add appropriate resource reference"
 }`;
   };
 
-  const generateTfvarsFile = () => {
+  const generateTfvarsExample = () => {
     const vars = selectedService?.required_fields.map(field => {
-      const exampleValue = field.default || (field.options ? field.options[0] : `example-${field.name}`);
-      return `${field.name} = "${exampleValue}"`;
+      const exampleValue = field.default || (field.options ? field.options[0] : `"example-${field.name}"`);
+      return `${field.name} = ${typeof exampleValue === 'string' && !field.options ? `"${exampleValue}"` : exampleValue}`;
     }).join('\n');
     
-    return `# Example Terraform Variables\n# Copy this file to terraform.tfvars and customize the values\n\n# Project Configuration\nproject_name = "my-project"\nenvironment  = "dev"\n\n# Service Configuration\n${vars}\n\n# Common tags for all resources\ntags = {\n  Environment = "dev"\n  Project     = "my-project"\n  Owner       = "devops-team"\n  ManagedBy   = "terraform"\n  CostCenter  = "engineering"\n}`;
-  };
-
-  const simulateDeployment = async () => {
-    if (Object.keys(generatedFiles).length === 0) {
-      addCliOutput('No Terraform files to deploy', 'error');
-      return;
-    }
-    setIsDeploying(true);
-    setDeploymentStatus('deploying');
-    setShowCli(true);
-    setCliOutput([]);
-    
-    addCliOutput('Starting Terraform deployment...');
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    addCliOutput('Terraform initialized successfully', 'success');
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    addCliOutput('Infrastructure deployed successfully!', 'success');
-    
-    setDeploymentStatus('success');
-    setIsDeploying(false);
-  };
-
-  const simulateDestroy = async () => {
-    if (Object.keys(generatedFiles).length === 0) {
-      addCliOutput('No Terraform infrastructure to destroy', 'error');
-      return;
-    }
-    setIsDestroying(true);
-    setDestroyStatus('destroying');
-    setShowCli(true);
-    setCliOutput([]);
-    
-    addCliOutput('Starting Terraform destroy...');
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    addCliOutput('Infrastructure destroyed successfully!', 'success');
-    
-    setDestroyStatus('success');
-    setIsDestroying(false);
-  };
-
-  const validateTerraform = async () => {
-    if (Object.keys(generatedFiles).length === 0) {
-      addCliOutput('No Terraform files to validate', 'error');
-      return;
-    }
-    setIsValidating(true);
-    setValidationStatus('validating');
-    setShowCli(true);
-    setCliOutput([]);
-    
-    addCliOutput('Validating Terraform configuration...');
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    addCliOutput('Terraform configuration is valid!', 'success');
-    
-    setValidationStatus('success');
-    setIsValidating(false);
+    return `# Example Terraform Variables\n# Copy this file to terraform.tfvars and customize the values\n\n${vars}\n\n# Common tags for all resources\ntags = {
+  Environment = "dev"
+  Project     = "my-project"
+  Owner       = "${user.name || 'user'}"
+  ManagedBy   = "terraform"
+}`;
   };
 
   const copyToClipboard = async (content?: string) => {
-    const textToCopy = content || (selectedFile && generatedFiles[selectedFile]);
+    const textToCopy = content || (selectedFile && generatedFiles[selectedFile]) || generatedCode?.code;
     if (textToCopy) {
-      await navigator.clipboard.writeText(textToCopy);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      try {
+        await navigator.clipboard.writeText(textToCopy);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch (err) {
+        console.error('Failed to copy:', err);
+      }
     }
   };
 
   const downloadFile = (filename: string, content: string) => {
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    try {
+      const blob = new Blob([content], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to download:', err);
+    }
   };
 
   const downloadZip = async () => {
     if (Object.keys(generatedFiles).length === 0) return;
     
-    const zip = new JSZip();
-    
-    Object.entries(generatedFiles).forEach(([filename, content]) => {
-      zip.file(filename, content);
-    });
-    
-    const readme = `# Terraform Project\n\nGenerated by TerraForge for ${selectedService?.name}\n\n## Usage\n\n1. Review and customize variables in \`terraform.tfvars\`\n2. Initialize Terraform: \`terraform init\`\n3. Plan deployment: \`terraform plan\`\n4. Apply changes: \`terraform apply\`\n\n## Files\n\n${Object.keys(generatedFiles).map(f => `- \`${f}\`: ${getFileDescription(f)}`).join('\n')}`;
-    zip.file('README.md', readme);
-    
-    const content = await zip.generateAsync({ type: 'blob' });
-    const url = URL.createObjectURL(content);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${selectedService?.name || 'terraform'}-project.zip`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    try {
+      const zip = new JSZip();
+      
+      Object.entries(generatedFiles).forEach(([filename, content]) => {
+        zip.file(filename, content);
+      });
+      
+      const readme = `# Terraform Project\n\nGenerated by TerraForge for ${selectedService?.name}\n\n## Usage\n\n1. Review and customize variables in \`terraform.tfvars\`\n2. Initialize Terraform: \`terraform init\`\n3. Plan deployment: \`terraform plan\`\n4. Apply changes: \`terraform apply\`\n\n## Files\n\n${Object.keys(generatedFiles).map(f => `- \`${f}\`: ${getFileDescription(f)}`).join('\n')}`;
+      zip.file('README.md', readme);
+      
+      const content = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(content);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${selectedService?.name || 'terraform'}-project.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to create zip:', err);
+    }
   };
 
   const getFileDescription = (filename: string) => {
     const descriptions: Record<string, string> = {
-      'versions.tf': 'Terraform and provider version constraints with backend configuration',
-      'variables.tf': 'Input variable definitions with validation and descriptions',
-      'main.tf': 'Main resource configurations with provider setup and data sources',
-      'outputs.tf': 'Output value definitions for resource information',
-      'terraform.tfvars.example': 'Example variable values for different environments'
+      'versions.tf': 'Terraform and provider version constraints',
+      'variables.tf': 'Input variable definitions',
+      'main.tf': 'Main resource configurations',
+      'outputs.tf': 'Output value definitions',
+      'terraform.tfvars.example': 'Example variable values'
     };
     return descriptions[filename] || 'Configuration file';
   };
+
+  const addCliOutput = (message: string, type: 'info' | 'success' | 'error' | 'warning' = 'info') => {
+    const timestamp = new Date().toLocaleTimeString();
+    const prefix = {
+      info: '[INFO]',
+      success: '[SUCCESS]',
+      error: '[ERROR]',
+      warning: '[WARNING]'
+    }[type];
+    
+    setCliOutput(prev => [...prev, `${timestamp} ${prefix} ${message}`]);
+    
+    // Auto-scroll to bottom
+    setTimeout(() => {
+      if (cliRef.current) {
+        cliRef.current.scrollTop = cliRef.current.scrollHeight;
+      }
+    }, 100);
+  };
+
+  const simulateDeployment = async () => {
+    if (!selectedService || Object.keys(generatedFiles).length === 0) {
+      addCliOutput('No Terraform files to deploy', 'error');
+      return;
+    }
+
+    setIsDeploying(true);
+    setDeploymentStatus('deploying');
+    setShowCli(true);
+    setCliOutput([]);
+
+    try {
+      addCliOutput('Starting Terraform deployment...');
+      
+      const response = await fetch('/api/terraform/deploy', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          files: generatedFiles,
+          userId: user.id,
+          projectName: selectedService.name.toLowerCase().replace(/\s+/g, '-')
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        // Display step-by-step output
+        result.steps.forEach((step: any) => {
+          addCliOutput(step.message, step.success ? 'success' : 'info');
+        });
+        
+        setDeploymentStatus('success');
+      } else {
+        addCliOutput(`Deployment failed: ${result.error}`, 'error');
+        if (result.errors) {
+          addCliOutput(result.errors, 'error');
+        }
+        setDeploymentStatus('error');
+      }
+    } catch (error) {
+      addCliOutput(`Deployment failed: ${error}`, 'error');
+      setDeploymentStatus('error');
+    } finally {
+      setIsDeploying(false);
+    }
+  };
+
+  const simulateDestroy = async () => {
+    if (!selectedService || Object.keys(generatedFiles).length === 0) {
+      addCliOutput('No Terraform infrastructure to destroy', 'error');
+      return;
+    }
+
+    setIsDestroying(true);
+    setDestroyStatus('destroying');
+    setShowCli(true);
+    setCliOutput([]);
+
+    try {
+      addCliOutput('Starting Terraform destroy...');
+      
+      const response = await fetch('/api/terraform/destroy', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          files: generatedFiles,
+          userId: user.id,
+          projectName: selectedService.name.toLowerCase().replace(/\s+/g, '-')
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        // Display step-by-step output
+        result.steps.forEach((step: any) => {
+          addCliOutput(step.message, step.success ? 'success' : step.message.includes('destroy') ? 'warning' : 'info');
+        });
+        
+        setDestroyStatus('success');
+      } else {
+        addCliOutput(`Destroy failed: ${result.error}`, 'error');
+        if (result.errors) {
+          addCliOutput(result.errors, 'error');
+        }
+        setDestroyStatus('error');
+      }
+    } catch (error) {
+      addCliOutput(`Destroy failed: ${error}`, 'error');
+      setDestroyStatus('error');
+    } finally {
+      setIsDestroying(false);
+    }
+  };
+
+  const validateTerraform = async () => {
+    if (!selectedService || Object.keys(generatedFiles).length === 0) {
+      addCliOutput('No Terraform files to validate', 'error');
+      return;
+    }
+
+    setIsValidating(true);
+    setValidationStatus('validating');
+    setShowCli(true);
+    setCliOutput([]);
+
+    try {
+      addCliOutput('Validating Terraform configuration...');
+      
+      const response = await fetch('/api/terraform/validate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          files: generatedFiles,
+          userId: user.id,
+          projectName: selectedService.name.toLowerCase().replace(/\s+/g, '-')
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        addCliOutput('Terraform configuration is valid!', 'success');
+        if (result.output) {
+          addCliOutput(result.output, 'info');
+        }
+        setValidationStatus('success');
+      } else {
+        addCliOutput(`Validation failed: ${result.error}`, 'error');
+        if (result.errors) {
+          addCliOutput(result.errors, 'error');
+        }
+        setValidationStatus('error');
+      }
+    } catch (error) {
+      addCliOutput(`Validation failed: ${error}`, 'error');
+      setValidationStatus('error');
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
+  const clearCliOutput = () => {
+    setCliOutput([]);
+  };
+
+  useEffect(() => {
+    if (cliRef.current) {
+      cliRef.current.scrollTop = cliRef.current.scrollHeight;
+    }
+  }, [cliOutput]);
 
   const currentProvider = providers[selectedProvider as keyof typeof providers];
 
@@ -1321,10 +1323,14 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
       <header className="bg-white bg-opacity-90 backdrop-blur-sm border-b border-gray-200 px-6 py-4 shadow-sm">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <Link to="/dashboard" className="flex items-center space-x-3 text-gray-600 hover:text-gray-800 transition-colors">
+          <Link 
+            to="/dashboard"
+            className="flex items-center space-x-3 text-gray-600 hover:text-gray-800 transition-colors"
+          >
             <ArrowLeft className="h-5 w-5" />
             <span>Back to Dashboard</span>
           </Link>
+          
           <div className="flex items-center space-x-3">
             <Code className="h-6 w-6 text-blue-400" />
             <span className="text-xl font-bold text-gray-800">Terraform Code Generator</span>
@@ -1350,7 +1356,7 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
                     className={`p-6 rounded-xl border-2 cursor-pointer transition-all duration-200 ${
                       selectedProvider === key 
                         ? 'border-blue-500 bg-gradient-to-br from-blue-900/30 to-purple-900/30 shadow-lg' 
-                        : 'border-gray-300 hover:border-gray-400 bg-white bg-opacity-60'
+                        : 'border-gray-300 hover:border-gray-400 bg-white bg-opacity-60 hover:bg-white hover:bg-opacity-80'
                     }`}
                     onClick={() => setSelectedProvider(key)}
                   >
@@ -1384,7 +1390,7 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
                       className={`p-4 rounded-xl border-2 cursor-pointer transition-all duration-200 min-h-[160px] flex flex-col ${
                         selectedService?.id === service.id
                           ? 'border-blue-500 bg-gradient-to-br from-blue-900/30 to-purple-900/30 shadow-lg' 
-                          : 'border-gray-300 hover:border-gray-400 bg-white bg-opacity-60'
+                          : 'border-gray-300 hover:border-gray-400 bg-white bg-opacity-60 hover:bg-white hover:bg-opacity-80'
                       }`}
                       onClick={() => setSelectedService(service)}
                     >
@@ -1393,12 +1399,14 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
                           <div className="mb-3">
                             <categoryInfo.icon className={`h-8 w-8 ${categoryInfo.color} mx-auto`} />
                           </div>
-                          <h3 className="font-semibold text-gray-800 mb-2 text-sm">{service.name}</h3>
-                          <p className="text-xs text-gray-600 mb-3">{service.description}</p>
+                          <h3 className="font-semibold text-gray-800 mb-2 text-sm leading-tight break-words">{service.name}</h3>
+                          <p className="text-xs text-gray-600 mb-3 leading-relaxed break-words">{service.description}</p>
                         </div>
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getCategoryStyle(service.category)}`}>
-                          {service.category}
-                        </span>
+                        <div className="flex justify-center">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getCategoryStyle(service.category)}`}>
+                            {service.category}
+                          </span>
+                        </div>
                       </div>
                     </motion.div>
                   );
@@ -1425,11 +1433,11 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
                       
                       {field.type === 'select' ? (
                         <select 
-                          value={formData[field.name] || ''}
+                          value={formData[field.name] || field.default || ''}
                           onChange={(e) => setFormData({...formData, [field.name]: e.target.value})}
                           className="w-full bg-white border border-gray-300 text-gray-800 px-4 py-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         >
-                          <option value="">Select {field.name}</option>
+                          <option value="">Select {field.name.split('_').join(' ')}</option>
                           {field.options?.map((option) => (
                             <option key={option} value={option}>{option}</option>
                           ))}
@@ -1437,10 +1445,10 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
                       ) : (
                         <input 
                           type="text"
-                          value={formData[field.name] || ''}
+                          value={formData[field.name] || field.default || ''}
                           onChange={(e) => setFormData({...formData, [field.name]: e.target.value})}
                           className="w-full bg-white border border-gray-300 text-gray-800 px-4 py-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          placeholder={`Enter ${field.name}`}
+                          placeholder={`Enter ${field.name.split('_').join(' ')}`}
                         />
                       )}
                     </div>
@@ -1457,6 +1465,7 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
 
                 {Object.keys(generatedFiles).length > 0 && (
                   <div className="mt-4 space-y-3">
+                    {/* Validation Button */}
                     <button 
                       onClick={validateTerraform}
                       disabled={isValidating || isDeploying || isDestroying}
@@ -1465,6 +1474,8 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
                           ? 'bg-gray-400 cursor-not-allowed' 
                           : validationStatus === 'success'
                           ? 'bg-blue-600 hover:bg-blue-700'
+                          : validationStatus === 'error'
+                          ? 'bg-orange-600 hover:bg-orange-700'
                           : 'bg-blue-600 hover:bg-blue-700'
                       } text-white`}
                     >
@@ -1472,14 +1483,17 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
                         <Loader className="h-4 w-4 animate-spin" />
                       ) : validationStatus === 'success' ? (
                         <CheckCircle className="h-4 w-4" />
+                      ) : validationStatus === 'error' ? (
+                        <XCircle className="h-4 w-4" />
                       ) : (
                         <AlertCircle className="h-4 w-4" />
                       )}
                       <span>
-                        {isValidating ? 'Validating...' : validationStatus === 'success' ? 'Valid Configuration' : 'Validate Configuration'}
+                        {isValidating ? 'Validating...' : validationStatus === 'success' ? 'Valid Configuration' : validationStatus === 'error' ? 'Validation Failed' : 'Validate Configuration'}
                       </span>
                     </button>
 
+                    {/* Deploy and Destroy Buttons */}
                     <div className="grid grid-cols-2 gap-3">
                       <button 
                         onClick={simulateDeployment}
@@ -1487,6 +1501,8 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
                         className={`px-4 py-3 rounded-lg font-medium transition-all flex items-center justify-center space-x-2 ${
                           isDeploying 
                             ? 'bg-gray-400 cursor-not-allowed' 
+                            : deploymentStatus === 'success'
+                            ? 'bg-green-600 hover:bg-green-700'
                             : 'bg-green-600 hover:bg-green-700'
                         } text-white`}
                       >
@@ -1508,6 +1524,8 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
                         className={`px-4 py-3 rounded-lg font-medium transition-all flex items-center justify-center space-x-2 ${
                           isDestroying 
                             ? 'bg-gray-400 cursor-not-allowed' 
+                            : destroyStatus === 'success'
+                            ? 'bg-gray-600 hover:bg-gray-700'
                             : 'bg-red-600 hover:bg-red-700'
                         } text-white`}
                       >
@@ -1530,6 +1548,7 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
           </div>
 
           <div className="space-y-6">
+            {/* Show CLI button when files are generated */}
             {Object.keys(generatedFiles).length > 0 && !showCli && (
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
@@ -1563,7 +1582,7 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4 pb-4 border-b border-gray-200">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4 pb-4 border-b border-gray-700">
                   {Object.keys(generatedFiles).map((filename) => (
                     <button
                       key={filename}
@@ -1571,7 +1590,7 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
                       className={`px-3 py-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-center space-x-1 ${
                         selectedFile === filename
                           ? 'bg-blue-600 text-white'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                       }`}
                     >
                       <FileText className="h-3 w-3" />
@@ -1610,12 +1629,70 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
                   </pre>
                 </div>
 
-                <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                  <p className="text-blue-700 text-xs">
+                <div className="mt-4 p-3 bg-blue-900 bg-opacity-30 border border-blue-600 rounded-lg">
+                  <p className="text-blue-300 text-xs">
                     <strong>{selectedFile}:</strong> {getFileDescription(selectedFile)}
                   </p>
                 </div>
               </motion.div>
+
+              {/* CLI Terminal */}
+              {showCli && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-gray-900 rounded-xl border border-gray-700 shadow-lg overflow-hidden"
+                >
+                  <div className="flex items-center justify-between p-3 bg-gray-800 border-b border-gray-700">
+                    <div className="flex items-center space-x-2">
+                      <Terminal className="h-4 w-4 text-green-400" />
+                      <span className="text-sm font-medium text-gray-300">Terraform CLI</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <button 
+                        onClick={clearCliOutput}
+                        className="text-gray-400 hover:text-gray-300 text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600"
+                      >
+                        Clear
+                      </button>
+                      <button 
+                        onClick={() => setShowCli(false)}
+                        className="text-gray-400 hover:text-gray-300 text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600"
+                      >
+                        Hide
+                      </button>
+                    </div>
+                  </div>
+                  <div 
+                    ref={cliRef}
+                    className="p-4 h-64 overflow-y-auto bg-gray-900 font-mono text-sm"
+                  >
+                    {cliOutput.length === 0 ? (
+                      <div className="text-gray-500 italic">CLI output will appear here...</div>
+                    ) : (
+                      cliOutput.map((line, index) => {
+                        const isError = line.includes('[ERROR]');
+                        const isSuccess = line.includes('[SUCCESS]');
+                        const isWarning = line.includes('[WARNING]');
+                        
+                        return (
+                          <div 
+                            key={index} 
+                            className={`mb-1 ${
+                              isError ? 'text-red-400' : 
+                              isSuccess ? 'text-green-400' : 
+                              isWarning ? 'text-yellow-400' : 
+                              'text-gray-300'
+                            }`}
+                          >
+                            {line}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </motion.div>
+              )}
             ) : (
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
@@ -1627,63 +1704,6 @@ const CodeGenerator: React.FC<CodeGeneratorProps> = ({ user }) => {
                 <p className="text-gray-500 text-sm">
                   Select a service and configure it to generate your Terraform code.
                 </p>
-              </motion.div>
-            )}
-
-            {showCli && (
-              <motion.div 
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-gray-900 rounded-xl border border-gray-700 shadow-lg overflow-hidden"
-              >
-                <div className="flex items-center justify-between p-3 bg-gray-800 border-b border-gray-700">
-                  <div className="flex items-center space-x-2">
-                    <Terminal className="h-4 w-4 text-green-400" />
-                    <span className="text-sm font-medium text-gray-300">Terraform CLI</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <button 
-                      onClick={() => setCliOutput([])}
-                      className="text-gray-400 hover:text-gray-300 text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600"
-                    >
-                      Clear
-                    </button>
-                    <button 
-                      onClick={() => setShowCli(false)}
-                      className="text-gray-400 hover:text-gray-300 text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600"
-                    >
-                      Hide
-                    </button>
-                  </div>
-                </div>
-                <div 
-                  ref={cliRef}
-                  className="p-4 h-64 overflow-y-auto bg-gray-900 font-mono text-sm"
-                >
-                  {cliOutput.length === 0 ? (
-                    <div className="text-gray-500 italic">CLI output will appear here...</div>
-                  ) : (
-                    cliOutput.map((line, index) => {
-                      const isError = line.includes('[ERROR]');
-                      const isSuccess = line.includes('[SUCCESS]');
-                      const isWarning = line.includes('[WARNING]');
-                      
-                      return (
-                        <div 
-                          key={index} 
-                          className={`mb-1 ${
-                            isError ? 'text-red-400' : 
-                            isSuccess ? 'text-green-400' : 
-                            isWarning ? 'text-yellow-400' : 
-                            'text-gray-300'
-                          }`}
-                        >
-                          {line}
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
               </motion.div>
             )}
           </div>
